@@ -1,0 +1,6 @@
+build/
+.gradle/
+local.properties
+src/main/assets/official.bin
+src/main/assets/cfw.bin
+src/main/assets/versions.json

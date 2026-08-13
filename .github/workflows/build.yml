@@ -1,0 +1,45 @@
+name: build
+
+# The APK bundles no binaries from git: the Gradle `bundleFirmware` task fetches
+# the official firmware (from the update manifest) and the latest CFW release at
+# build time. So a plain `assembleDebug` on a hosted runner produces a complete APK.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']          # a version tag (e.g. v1.0) publishes the APK as a Release
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # needed to create the Release and upload the APK on tag builds
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pebble-index-flasher-debug
+          path: build/outputs/apk/debug/*.apk
+
+      # On a version tag, publish the just-built APK as a GitHub Release.
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" build/outputs/apk/debug/*.apk --clobber
