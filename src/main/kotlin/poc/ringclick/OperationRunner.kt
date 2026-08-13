@@ -10,8 +10,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * step by re-scan. Hides the §3.7 gotchas.
  *
  *   official ──(invalidate validflag + reset, Telesto)──► failsafe
- *   failsafe ──(SUOTA cfw.bin)──► CFW      failsafe ──(SUOTA official.bin)──► official
+ *   failsafe ──(SUOTA cfw.bin)──► CFW
  *   CFW ──(GATT 0x00)──► failsafe
+ *
+ * failsafe -> official is NOT ours: the official app syncs and reinstalls the
+ * factory firmware on its own when it sees a failsafe ring.
  */
 class OperationRunner(
     private val context: Context,
@@ -49,17 +52,6 @@ class OperationRunner(
         log("=== SUOTA cfw.bin (${images.cfwVersion}) ===")
         if (!flasher.flash(images.cfw)) return false
         return verify(RingKind.CFW)
-    }
-
-    /** failsafe -> official via SUOTA. */
-    suspend fun restoreOfficial(): Boolean {
-        val s = scanner.state.value
-        if (s.kind != RingKind.FAILSAFE) {
-            log("'Restore official' is only possible from failsafe (official is the factory one)."); return false
-        }
-        log("=== SUOTA official.bin (${images.officialVersion}) ===")
-        if (!flasher.flash(images.official)) return false
-        return verify(RingKind.OFFICIAL)
     }
 
     /** Wait for the scan to show the expected state (the ring rebooted into another one). */

@@ -112,6 +112,9 @@ class MainActivity : AppCompatActivity() {
                 append("\nClicks: ").append(s.totalClicks)
                 if (s.counter != null) append("  (counter ").append(s.counter).append(')')
             }
+            if (s.kind == RingKind.FAILSAFE) {
+                append("\n\nTo restore the official firmware, keep the ring in failsafe and open the official app — it will sync and reinstall it.")
+            }
         }
         instruction(when {
             busy -> "Working — keep the ring close and the screen on."
@@ -145,18 +148,14 @@ class MainActivity : AppCompatActivity() {
         actions.removeAllViews()
         when (kind) {
             RingKind.CFW -> addAction("Enter failsafe") { runner.enterFailsafe() }
-            RingKind.FAILSAFE -> {
-                addAction("Flash CFW") { runner.flashCfw() }
-                addAction("Restore official", primary = false) { runner.restoreOfficial() }
-            }
+            RingKind.FAILSAFE -> addAction("Flash CFW") { runner.flashCfw() }
             RingKind.OFFICIAL -> addAction("Flash CFW") { runner.flashCfw() }
             RingKind.NONE -> {}
         }
     }
 
-    private fun addAction(label: String, primary: Boolean = true, op: suspend () -> Boolean) {
-        val btn = if (primary) MaterialButton(this)
-        else MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
+    private fun addAction(label: String, op: suspend () -> Boolean) {
+        val btn = MaterialButton(this)
         btn.text = label
         btn.setOnClickListener { runOp(label, op) }
         actions.addView(btn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

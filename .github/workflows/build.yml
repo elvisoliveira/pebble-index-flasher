@@ -1,8 +1,8 @@
 name: build
 
 # The APK bundles no binaries from git: the Gradle `bundleFirmware` task fetches
-# the official firmware (from the update manifest) and the latest CFW release at
-# build time. So a plain `assembleDebug` on a hosted runner produces a complete APK.
+# the latest CFW release at build time. So a plain `assembleDebug` on a hosted
+# runner produces a complete APK.
 
 on:
   push:
