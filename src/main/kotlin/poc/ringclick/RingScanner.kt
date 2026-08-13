@@ -23,8 +23,6 @@ data class RingState(
     /** Byte from the CFW click beacon (mfr 0xFFFF, payload[0]); null outside CFW. */
     val counter: Int? = null,
     val totalClicks: Int = 0,
-    /** Raw advertisement in hex (E3 diagnostics). */
-    val rawAdv: String? = null,
     val lastSeenMs: Long = 0L,
 )
 
@@ -83,7 +81,6 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
 
             state.value = RingState(
                 kind, name, result.device.address, result.rssi, counter, total,
-                rec.bytes?.joinToString(" ") { "%02X".format(it) },
                 SystemClock.elapsedRealtime(),
             )
         }

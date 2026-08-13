@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private lateinit var logScroll: ScrollView
 
     private var busy = false
+    private var renderedKind: RingKind? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,12 +74,7 @@ class MainActivity : Activity() {
     }
 
     private fun render(s: RingState) {
-        val kindLabel = when (s.kind) {
-            RingKind.OFFICIAL -> "OFFICIAL"
-            RingKind.FAILSAFE -> "FAILSAFE"
-            RingKind.CFW -> "CFW"
-            RingKind.NONE -> "not found"
-        }
+        val kindLabel = if (s.kind == RingKind.NONE) "not found" else s.kind.name
         val color = when (s.kind) {
             RingKind.CFW -> Color.parseColor("#2E7D32")
             RingKind.FAILSAFE -> Color.parseColor("#EF6C00")
@@ -100,10 +96,13 @@ class MainActivity : Activity() {
                 }
             }
         }
-        if (!busy) renderActions(s.kind)
+        // Rebuild buttons only on a state change — render() fires per advertisement,
+        // and recreating a Button mid-tap would eat the tap.
+        if (!busy && s.kind != renderedKind) renderActions(s.kind)
     }
 
     private fun renderActions(kind: RingKind) {
+        renderedKind = kind
         actions.removeAllViews()
         when (kind) {
             RingKind.CFW -> addAction("Enter failsafe") { runner.enterFailsafe() }

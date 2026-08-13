@@ -1,7 +1,6 @@
 package poc.ringclick
 
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.wtlp.haversinesatellitelibrary.HaversineException
 import com.wtlp.haversinesatellitelibrary.HaversineLinkController
@@ -25,31 +24,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Cursor of the last synced collection; the lib advances it on its own. */
-class PrefsIndexStorage(context: Context) : CollectionIndexStorage {
-    private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
-    private val stateFlow = MutableStateFlow(
-        if (prefs.contains("lastIndex")) prefs.getInt("lastIndex", 0) else null
-    )
-    override val lastSuccessfulCollectionIndex: StateFlow<Int?> = stateFlow
-    override fun setLastSuccessfulCollectionIndex(index: Int?) {
-        prefs.edit().apply {
-            if (index == null) remove("lastIndex") else putInt("lastIndex", index)
-        }.apply()
-        stateFlow.value = index
-    }
-}
-
 /**
  * Telesto memory operations (lifted from DumpActivity). The OFFICIAL ring speaks
- * Telesto; the CFW does not. Used only to:
- *   - official -> failsafe: invalidate the validflag + reset;
- *   - read the validflag (verification) and the bootlog (brick risk).
+ * Telesto; the CFW does not. Used only for official -> failsafe: invalidate the
+ * validflag + reset.
  *
  * Inviolable rules (PLAN §3.2 / §8):
  *   - Telesto ops on the MAIN thread only (the native layer delivers on the main
@@ -65,24 +47,6 @@ class TelestoOps(private val context: Context, private val log: (String) -> Unit
     /** Primary record; validflag at offset 2 (0xAA=valid, 0x00=invalid/failsafe). */
     private val primary = 0x40060000
     private val validflagOffset = 2
-    private val bootlog = 0x40060002   // event log, physical 0x1F000
-
-    /** Reads the primary's validflag. 0xAA=a valid image booted, 0x00=failsafe, null=failure. */
-    suspend fun readValidflag(address: String): Int? {
-        val link = bringUp(address) ?: return null
-        val d = read(link, primary, validflagOffset, 1)
-        return d?.firstOrNull()?.toInt()?.and(0xFF)
-    }
-
-    /**
-     * Reads the first bytes of the event log (boot-attempt count). Clean state
-     * = AD DE AD DE (the 0xDEADDEAD magic written by the CFW on a healthy boot); the
-     * failsafe stamps a slot per boot and after 4 refuses the primary (§3.7 #4).
-     */
-    suspend fun readBootlog(address: String): ByteArray? {
-        val link = bringUp(address) ?: return null
-        return read(link, bootlog, 0, 64)
-    }
 
     /**
      * official -> failsafe: writes 0x00 to the validflag (0xAA->0x00, bit-clear, no
@@ -188,7 +152,12 @@ class TelestoOps(private val context: Context, private val log: (String) -> Unit
                 override fun shouldWipeCollectionsBeforeTransfer(satellite: KMPHaversineSatellite) = false
                 override fun wipedCollectionsBeforeTransfer(satellite: KMPHaversineSatellite) {}
             },
-            collectionIndexStorage = PrefsIndexStorage(context.applicationContext),
+            // In-memory stub: this app never syncs collections, the cursor is never read back.
+            collectionIndexStorage = object : CollectionIndexStorage {
+                private val flow = MutableStateFlow<Int?>(null)
+                override val lastSuccessfulCollectionIndex: StateFlow<Int?> = flow
+                override fun setLastSuccessfulCollectionIndex(index: Int?) { flow.value = index }
+            },
             context = context.applicationContext,
             hwVersion = Pair(11, 0),
             CoroutineScope(Dispatchers.Default),

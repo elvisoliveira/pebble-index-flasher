@@ -14,14 +14,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   CFW ──(GATT 0x00)──► failsafe
  */
 class OperationRunner(
-    context: Context,
+    private val context: Context,
     private val scanner: RingScanner,
     private val images: ImageStore,
     private val log: (String) -> Unit,
 ) {
     private val flasher = Flasher(context, log)
     private val telesto = TelestoOps(context, log)
-    private val ctx = context
 
     /** CFW -> failsafe via the control point, confirmed by re-scan. */
     suspend fun enterFailsafe(): Boolean {
@@ -29,7 +28,7 @@ class OperationRunner(
         if (s.kind != RingKind.CFW || s.address == null) {
             log("'Enter failsafe' is only possible from CFW."); return false
         }
-        CfwControl.enterFailsafe(ctx, s.address, log)
+        if (!CfwControl.enterFailsafe(context, s.address, log)) return false
         return verify(RingKind.FAILSAFE)
     }
 
