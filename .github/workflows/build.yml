@@ -6,10 +6,8 @@ name: build
 
 on:
   push:
-    branches: [master]
-    tags: ['v*']          # a version tag (e.g. v1.0) publishes the APK as a Release
-  pull_request:
-  workflow_dispatch:
+    tags: ['v*']          # a version tag (e.g. v1.0) builds and publishes the APK as a Release
+  workflow_dispatch:        # manual re-run only (does not fire on its own)
 
 jobs:
   build:
