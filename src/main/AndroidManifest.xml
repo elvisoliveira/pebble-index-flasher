@@ -7,10 +7,15 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- No INTERNET / ACCESS_NETWORK_STATE on purpose: fully offline app, firmwares in the APK. -->
 
-    <application android:label="Pebble Index Flasher">
+    <application
+        android:label="Pebble Index Flasher"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.PebbleIndexFlasher">
+        <!-- portrait: a rotation would recreate the Activity and abort a flash mid-SUOTA -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

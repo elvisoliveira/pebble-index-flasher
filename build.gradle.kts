@@ -35,6 +35,7 @@ dependencies {
     // Same version the official app uses (mobileapp libs.versions.toml)
     implementation("io.github.coredevices.haversine:haversine:f8d8bd7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
+    implementation("com.google.android.material:material:1.12.0")
 }
 
 // Fetches both firmwares into assets/ BEFORE mergeAssets, so no binaries live in
