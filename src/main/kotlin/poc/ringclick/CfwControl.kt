@@ -18,8 +18,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * CFW does NOT speak Telesto — this is the BLE path back to failsafe.
  *
  * The ring RESETS inside the write handler, so the link drops and no write callback
- * arrives — a dropped link is SUCCESS, not failure (PLAN §3.2). The real
- * confirmation is a re-scan showing "Pebble Index FBA" (OperationRunner).
+ * arrives — a dropped link is SUCCESS, not failure (PLAN §3.2). The real confirmation
+ * is a re-scan classifying the ring as FAILSAFE — its 0x0EEA advertisement payload now
+ * begins with the AD DE AD DE marker (OperationRunner; see RingScanner.classify).
  *
  * ponytail: enterFailsafe only. The 0x01 opcode (raw 1-byte poke) is left out —
  * the low-level escape hatch stays in the Python tooling (ctrl_write.py).

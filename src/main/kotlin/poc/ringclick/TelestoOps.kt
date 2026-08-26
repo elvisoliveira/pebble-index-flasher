@@ -19,11 +19,16 @@ import coredevices.haversine.KMPHaversineHacksDelegate
 import coredevices.haversine.KMPHaversineSatellite
 import coredevices.haversine.KMPHaversineSatelliteManager
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -52,24 +57,23 @@ class TelestoOps(private val context: Context, private val log: (String) -> Unit
      * official -> failsafe: writes 0x00 to the validflag (0xAA->0x00, bit-clear, no
      * erase) and resets. The ring comes back up in failsafe. Verify with a re-scan.
      */
-    suspend fun invalidatePrimaryAndReset(address: String): Boolean {
-        val link = bringUp(address) ?: return false
+    suspend fun invalidatePrimaryAndReset(address: String): Boolean = withLink(address) { link ->
         log("--- invalidating validflag: PROGRAM 0x00 at 0x%08X off %d".format(primary, validflagOffset))
         val before = read(link, primary, validflagOffset, 1)
         log("    before = ${preview(before)}")
         val r = telesto(link, TelestoOperationType.TELESTO_PROGRAM_MEMORY,
             primary, validflagOffset, 1, byteArrayOf(0x00))
-        if (r == null) { log("    PROGRAM failed — image intact, safe to retry"); return false }
+        if (r == null) { log("    PROGRAM failed — image intact, safe to retry"); return@withLink false }
         delay(1_000)
         val after = read(link, primary, validflagOffset, 1)
         log("    after = ${preview(after)}")
         if (after?.firstOrNull()?.toInt()?.and(0xFF) != 0x00) {
-            log("    validflag did NOT clear — aborting reset"); return false
+            log("    validflag did NOT clear — aborting reset"); return@withLink false
         }
         log("--- RESET (the ring comes back up in failsafe; the link drops)")
         sendReset(link)
-        return true
-    }
+        true
+    } ?: false
 
     // --- infrastructure (main-thread dispatch, reflection, bring-up) ---
 
@@ -135,14 +139,27 @@ class TelestoOps(private val context: Context, private val log: (String) -> Unit
     }
 
     /**
-     * Brings the satellite up by its ADVERTISED address via getSatelliteById (without
-     * the scan/sync loop that triggers the lib's auto-update) and returns its
-     * linkController.
+     * Creates a satellite manager, DRIVES DISCOVERY, hands [block] the ring's link
+     * controller, then tears the whole thing down (scan + manager scope).
+     *
+     * The catch that broke official -> failsafe: `getSatelliteById` is only a ONE-SHOT
+     * `wrap.retrieveSatellite(id)`, which throws ("No cached state ... cannot reconstruct
+     * without discovery") the instant it runs if discovery has not cached the ring yet —
+     * it does NOT wait. And `startScanning` is a COLD flow: the native scan runs only
+     * while it is collected. So we launch a collector to drive discovery AND retry
+     * getSatelliteById until the cache is populated (or 120 s elapse).
+     *
+     * Skipping the scan was meant to dodge the lib's auto-update, but that is moot: the
+     * app has no INTERNET permission, so the update job fails on DNS (seen in logcat).
+     * Discovery here only finds the ring; it never programs it.
      */
     @SuppressLint("MissingPermission")
-    private suspend fun bringUp(address: String): HaversineLinkController? {
+    private suspend fun <T> withLink(address: String, block: suspend (HaversineLinkController) -> T): T? {
+        val id = address.replace(":", "")
+        // SupervisorJob: the lib's offline update job fails on DNS; don't let it cancel us.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val manager = KMPHaversineSatelliteManager(
-            pairedSatelliteIdProvider = { address.replace(":", "") },
+            pairedSatelliteIdProvider = { id },
             debugDelegate = object : KMPHaversineDebugDelegate {
                 override fun handleHaversineDebugInfo(info: KMPHaversineDebugInfo) {}
                 override fun shouldReadRxRSSI(satellite: KMPHaversineSatellite) = false
@@ -160,20 +177,36 @@ class TelestoOps(private val context: Context, private val log: (String) -> Unit
             },
             context = context.applicationContext,
             hwVersion = Pair(11, 0),
-            CoroutineScope(Dispatchers.Default),
+            scope,
         )
-        manager.awaitBluetoothReady()
-        log("Opening link with $address (no auto-update)…")
-        val satellite = withTimeoutOrNull(120_000) {
-            manager.getSatelliteById(address.replace(":", ""))
-        } ?: run {
-            log("FAILED: satellite did not appear within 120s — press the ring button"); return null
+        try {
+            manager.awaitBluetoothReady()
+            // Cold flow: collecting it starts the native scan; cancelling the scope stops it.
+            scope.launch {
+                try { manager.startScanning().collect { } }
+                catch (_: CancellationException) { /* expected: finally cancels the scope */ }
+                catch (e: Exception) { log("scan ended: $e") }
+            }
+            log("Opening link with $address (scanning; no auto-update)…")
+            // Retry until discovery caches the ring (getSatelliteById throws until then).
+            val satellite = withTimeoutOrNull(120_000) {
+                var s: KMPHaversineSatellite? = null
+                while (s == null) {
+                    s = try { manager.getSatelliteById(id) } catch (_: Exception) { null }
+                    if (s == null) delay(1_500)
+                }
+                s
+            } ?: run {
+                log("FAILED: satellite did not appear within 120s — press the ring button"); return null
+            }
+            val link = linkControllerOf(satellite.wrap) ?: run {
+                log("FAILED: linkController unreachable via reflection"); return null
+            }
+            log("Satellite ${satellite.id} ready; link = ${link.state}")
+            return block(link)
+        } finally {
+            scope.cancel()   // stop scanning + tear down the manager's coroutines (no leak)
         }
-        val link = linkControllerOf(satellite.wrap) ?: run {
-            log("FAILED: linkController unreachable via reflection"); return null
-        }
-        log("Satellite ${satellite.id} ready; link = ${link.state}")
-        return link
     }
 
     private fun preview(data: ByteArray?): String =

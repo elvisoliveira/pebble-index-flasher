@@ -28,14 +28,20 @@ data class RingState(
 
 /**
  * Continuous, connectionless BLE scan — the single source of truth about the ring
- * (PLAN §3.1). Match by name substring ("Pebble Index"); the state comes from the
- * suffix + the manufacturer-data company id:
- *   CFW      -> mfr 0xFFFF (payload[0] = click counter) / name "… CFW"
- *   FAILSAFE -> mfr 0x0EEA / name "… FBA"
- *   OFFICIAL -> any other "Pebble Index …" (advertises the stock service UUID)
+ * (PLAN §3.1). Match by name substring ("Pebble Index"); the state comes purely from
+ * the manufacturer data (captured on a real ring — see the flasher wiki, "Telling the
+ * firmware apart"):
+ *   CFW      -> mfr company 0xFFFF (payload[0] = click counter)
+ *   FAILSAFE -> mfr company 0x0EEA, payload starts with AD DE AD DE
+ *   OFFICIAL -> mfr company 0x0EEA, payload starts with FF FF
+ * Both stock states are matched positively by their payload signature; anything else is
+ * ignored (NONE), never guessed.
  *
- * No ScanFilter: the native filter only matches names exactly and we need a
- * substring (the suffix varies between states).
+ * The name and the advertised service UUID are NOT reliable: official and failsafe
+ * share both (same device-specific "Pebble Index <suffix>" and the same 0x0EEA company
+ * id) — only the payload signature tells them apart. See classify().
+ *
+ * No ScanFilter: the native filter only matches names exactly and we need a substring.
  */
 class RingScanner(private val context: Context, private val log: (String) -> Unit) {
 
@@ -54,12 +60,10 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
             if (!name.contains(NAME_PART, ignoreCase = true)) return
 
             val cfwMfr = rec.getManufacturerSpecificData(CFW_COMPANY)
-            val kind = when {
-                cfwMfr != null || name.endsWith("CFW") -> RingKind.CFW
-                rec.getManufacturerSpecificData(FAILSAFE_COMPANY) != null ||
-                    name.endsWith("FBA") -> RingKind.FAILSAFE
-                else -> RingKind.OFFICIAL
-            }
+            val kind = classify(cfwMfr, rec.getManufacturerSpecificData(STOCK_COMPANY))
+            // Unrecognised advertisement: ignore it rather than clobber a good state.
+            // A real ring keeps advertising; the stale timer drops to NONE if it stops.
+            if (kind == RingKind.NONE) return
 
             var counter: Int? = null
             if (kind == RingKind.CFW && cfwMfr != null && cfwMfr.isNotEmpty()) {
@@ -122,10 +126,43 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
             .adapter?.bluetoothLeScanner?.stopScan(cb)
     }
 
-    private companion object {
+    companion object {
         const val NAME_PART = "Pebble Index"
-        const val CFW_COMPANY = 0xFFFF
-        const val FAILSAFE_COMPANY = 0x0EEA
-        const val STALE_MS = 15_000L
+        const val CFW_COMPANY = 0xFFFF      // CFW click beacon; official/failsafe use 0x0EEA
+        const val STOCK_COMPANY = 0x0EEA    // shared by official AND failsafe
+        private const val STALE_MS = 15_000L
+
+        // Both stock firmwares carry a signature in the first bytes of their 0x0EEA
+        // payload, and the signatures are mutually exclusive (0xAD vs 0xFF at byte 0):
+        //   FAILSAFE_MARKER — the boot-attempt-counter "deadhead", a firmware constant
+        //     confirmed against the flash marker documented in the firmware wiki.
+        //   OFFICIAL_MARKER — the captured ring's official payload is FF FF B9 D8 XX YY,
+        //     where the last two bytes change between advertisements (a live counter) and
+        //     FF FF B9 D8 stays constant. Matching the FF FF prefix is deliberate — the
+        //     full payload varies. ponytail: one physical ring, so whether B9 D8 is
+        //     device-specific is unverified; FF FF looks like a fixed tag. If a second
+        //     ring's official payload does not start with FF FF, widen this signature.
+        private val FAILSAFE_MARKER = byteArrayOf(0xAD.toByte(), 0xDE.toByte(), 0xAD.toByte(), 0xDE.toByte())
+        private val OFFICIAL_MARKER = byteArrayOf(0xFF.toByte(), 0xFF.toByte())
+
+        /**
+         * Pure classifier over the two manufacturer-data payloads. Both stock states are
+         * matched *positively* by their 0x0EEA signature; a 0x0EEA payload matching
+         * neither (or no recognised beacon at all) returns NONE — the caller ignores it
+         * rather than guessing a state and offering a destructive action on it.
+         */
+        fun classify(cfwMfr: ByteArray?, stockMfr: ByteArray?): RingKind = when {
+            cfwMfr != null -> RingKind.CFW
+            stockMfr == null -> RingKind.NONE
+            stockMfr.startsWith(FAILSAFE_MARKER) -> RingKind.FAILSAFE
+            stockMfr.startsWith(OFFICIAL_MARKER) -> RingKind.OFFICIAL
+            else -> RingKind.NONE
+        }
+
+        private fun ByteArray.startsWith(prefix: ByteArray): Boolean {
+            if (size < prefix.size) return false
+            for (i in prefix.indices) if (this[i] != prefix[i]) return false
+            return true
+        }
     }
 }
