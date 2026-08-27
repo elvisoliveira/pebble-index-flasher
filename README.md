@@ -52,3 +52,13 @@ and writes it into the app's assets. So the build needs network access, and
 GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml))
 builds a complete APK on every push (and publishes it as a Release on a version
 tag).
+
+## Documentation
+
+The [project wiki](https://github.com/elvisoliveira/pebble-index-flasher/wiki) covers the
+protocol and the mechanics: [Telesto](https://github.com/elvisoliveira/pebble-index-flasher/wiki/Telesto),
+[how firmware gets onto the ring](https://github.com/elvisoliveira/pebble-index-flasher/wiki/How-firmware-gets-onto-the-ring),
+and [recovering a stock ring](https://github.com/elvisoliveira/pebble-index-flasher/wiki/Recovering-a-stock-ring).
+
+The ring's hardware and boot process are documented in the
+[firmware wiki](https://github.com/elvisoliveira/pebble-index-cfw/wiki).
