@@ -53,26 +53,40 @@ val bundleFirmware by tasks.registering {
     val cfwRawUrl = "https://github.com/elvisoliveira/pebble-index-cfw/releases/latest/download/DA14531_App.bin"
     val cfwLatestApi = "https://api.github.com/repos/elvisoliveira/pebble-index-cfw/releases/latest"
 
+    // Wrap the raw DA14531 body in the bootloader's 64-byte 0x7051 image header
+    // (a port of the SDK's mkimage.py). Little-endian throughout.
+    fun mkimage(body: ByteArray): ByteArray {
+        require(body.size <= 0x7FC0) { "cfw image too big: 0x${body.size.toString(16)}" }
+        val header = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put(byteArrayOf(0x70, 0x51, 0xAA.toByte(), 0x00))                    // magic + valid flag
+            putInt(body.size)                                                    // body size
+            putInt((CRC32().apply { update(body) }.value and 0xFFFFFFFFL).toInt())  // CRC32 of body
+            put("CFW".toByteArray().copyOf(16))                                  // version[16]
+            putInt(0)                                                            // timestamp
+        }
+        return header.array() + body
+    }
+
+    // The release tag, for the UI only. Best-effort: "latest" if the API call fails.
+    fun latestReleaseTag(): String = try {
+        @Suppress("UNCHECKED_CAST")
+        ((JsonSlurper().parseText(URL(cfwLatestApi).readText()) as Map<String, Any>)["tag_name"] as String)
+    } catch (e: Exception) { "latest" }
+
     doLast {
         assets.mkdirs()
 
-        // cfw: raw release body + 0x7051 header (mkimage.py port).
-        val body = URL(cfwRawUrl).openStream().use { it.readBytes() }
-        require(body.size <= 0x7FC0) { "cfw image too big: 0x${body.size.toString(16)}" }
-        val bb = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN)
-        bb.put(byteArrayOf(0x70, 0x51, 0xAA.toByte(), 0x00))
-        bb.putInt(body.size)
-        bb.putInt((CRC32().apply { update(body) }.value and 0xFFFFFFFFL).toInt())
-        bb.put("CFW".toByteArray().copyOf(16))   // version[16]
-        bb.putInt(0)                             // timestamp
-        cfwBin.writeBytes(bb.array() + body)
-        val cfwVer = try {
-            @Suppress("UNCHECKED_CAST")
-            ((JsonSlurper().parseText(URL(cfwLatestApi).readText()) as Map<String, Any>)["tag_name"] as String)
-        } catch (e: Exception) { "latest" }
+        // Source: a locally-built firmware (-PcfwLocal=<path to DA14531_App.bin>, for
+        // testing an unreleased build) or the latest pebble-index-cfw GitHub release.
+        val local = findProperty("cfwLocal") as String?
+        val body = if (local != null) File(local).readBytes()
+                   else URL(cfwRawUrl).openStream().use { it.readBytes() }
+        val version = if (local != null) "local" else latestReleaseTag()
 
-        versions.writeText("""{ "cfw": "$cfwVer" }""" + "\n")
-        logger.lifecycle("bundleFirmware: cfw=$cfwVer (${cfwBin.length()} B)")
+        cfwBin.writeBytes(mkimage(body))
+        versions.writeText("""{ "cfw": "$version" }""" + "\n")
+        logger.lifecycle("bundleFirmware: cfw=$version (${cfwBin.length()} B)" +
+            (local?.let { " [local: $it]" } ?: ""))
     }
 }
 
