@@ -95,20 +95,13 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
     @SuppressLint("MissingPermission")
     fun start(scope: CoroutineScope) {
         if (scanning) return
-        val scanner = context.getSystemService(BluetoothManager::class.java)
-            .adapter?.bluetoothLeScanner
-        if (scanner == null) { log("No BLE scanner (Bluetooth off?)"); return }
-        scanner.startScan(
-            null,
-            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
-            cb,
-        )
+        if (!openScan()) { log("No BLE scanner (Bluetooth off?)"); return }
         scanning = true
         scope.launch {
             // Expire to NONE when the advertisement stops (failsafe advertises
             // intermittently — going quiet IS information: "press the button").
             while (isActive) {
-                delay(3_000)
+                delay(500)
                 val s = state.value
                 if (s.kind != RingKind.NONE &&
                     SystemClock.elapsedRealtime() - s.lastSeenMs > STALE_MS) {
@@ -116,21 +109,53 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
                 }
             }
         }
+
+        // Auto-heal: Android silently stops delivering scan results after a fixed window
+        // (~10 min measured on a Pixel 7a — results just stop, foreground, no onScanFailed).
+        // Re-issuing startScan opens a fresh window, so restart well inside it. ~1 start per
+        // 4 min is far under the framework's 5-starts-per-30-s limit.
+        // ponytail: fixed-interval proactive restart; if some OEM's window is < RESTART_MS,
+        //           switch to a reactive restart keyed on "no adverts seen for N s".
+        scope.launch {
+            while (isActive) {
+                delay(RESTART_MS)
+                closeScan()
+                openScan()
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun openScan(): Boolean {
+        val s = context.getSystemService(BluetoothManager::class.java)
+            .adapter?.bluetoothLeScanner ?: return false
+        s.startScan(
+            null,
+            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
+            cb,
+        )
+        return true
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun closeScan() {
+        context.getSystemService(BluetoothManager::class.java)
+            .adapter?.bluetoothLeScanner?.stopScan(cb)
     }
 
     @SuppressLint("MissingPermission")
     fun stop() {
         if (!scanning) return
         scanning = false
-        context.getSystemService(BluetoothManager::class.java)
-            .adapter?.bluetoothLeScanner?.stopScan(cb)
+        closeScan()
     }
 
     companion object {
+        private const val RESTART_MS = 4L * 60 * 1000   // proactive scan restart, inside the ~10 min OS window
         const val NAME_PART = "Pebble Index"
         const val CFW_COMPANY = 0xFFFF      // CFW click beacon; official/failsafe use 0x0EEA
         const val STOCK_COMPANY = 0x0EEA    // shared by official AND failsafe
-        private const val STALE_MS = 15_000L
+        private const val STALE_MS = 1_000L   // burst mode: track the ~3s burst closely
 
         // Both stock firmwares carry a signature in the first bytes of their 0x0EEA
         // payload, and the signatures are mutually exclusive (0xAD vs 0xFF at byte 0):
