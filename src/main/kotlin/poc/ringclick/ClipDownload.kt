@@ -191,11 +191,14 @@ object ClipDownload {
     }
 
     /**
-     * Measured on the bench, not derived: a one-second hold produced 10996 samples, so
-     * the ring's converter free-runs at about this. It is the playback rate, so getting
-     * it wrong shifts the pitch rather than breaking anything.
+     * MIC_SAMPLE_RATE_HZ on the ring, and it has to match or the pitch comes out wrong.
+     *
+     * The converter free-runs at about 11 kHz — whatever its conversion time makes it,
+     * not a rate anyone chose — and the firmware averages that down to 8 kHz, which is
+     * the telephone standard, plenty for voice, and fits 37% more recording in the same
+     * buffer.
      */
-    const val SAMPLE_RATE = 11000
+    const val SAMPLE_RATE = 8000
 
     private const val WANTED_MTU = 247
     private const val ATT_OVERHEAD = 3
