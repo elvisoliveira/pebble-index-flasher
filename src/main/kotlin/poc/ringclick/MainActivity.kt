@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -52,8 +53,15 @@ class MainActivity : AppCompatActivity() {
      * buttons belong on screen has to be part of that key — the audio ones appear and
      * disappear as recordings come and go. */
     private var renderedAudio = false
-    private var clip: File? = null
     private var player: MediaPlayer? = null
+    private lateinit var clips: ClipStore
+    private lateinit var recordings: LinearLayout
+    private lateinit var recordingsTitle: TextView
+    /* Auto-fetch guards. The ring drops a clip once it has been delivered, so a success
+     * takes the advertisement's count to zero and cannot re-trigger. A FAILURE leaves it
+     * there, and without a pause every advertisement would start another attempt. */
+    private var autoFetching = false
+    private var autoRetryAfter = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)   // Material You wallpaper palette
@@ -67,6 +75,10 @@ class MainActivity : AppCompatActivity() {
         actions = findViewById(R.id.actions)
         logView = findViewById(R.id.logView)
         logScroll = findViewById(R.id.logScroll)
+        recordings = findViewById(R.id.recordings)
+        recordingsTitle = findViewById(R.id.recordingsTitle)
+        clips = ClipStore(this)
+        renderRecordings()
 
         // targetSdk 36 forces edge-to-edge: keep the content off the system bars.
         findViewById<View>(R.id.root).setOnApplyWindowInsetsListener { v, insets ->
@@ -138,6 +150,50 @@ class MainActivity : AppCompatActivity() {
         // and recreating a Button mid-tap would eat the tap.
         val hasAudio = clipSeconds(s) != null
         if (!busy && (s.kind != renderedKind || hasAudio != renderedAudio)) renderActions(s.kind, hasAudio)
+        if (hasAudio) maybeAutoFetch(s)
+    }
+
+    /*
+     * A recording announces itself: the ring advertises after every click and after every
+     * recording, and the count it carries is non-zero only while a clip is still waiting.
+     * So there is nothing to poll and nothing to ask — seeing one is reason enough to go
+     * and get it, and the ring clearing it on delivery is what stops that from repeating.
+     */
+    private fun maybeAutoFetch(s: RingState) {
+        if (busy || autoFetching || SystemClock.elapsedRealtime() < autoRetryAfter) return
+        val address = s.address ?: return
+        autoFetching = true
+        scope.launch {
+            logLine("\n=== Recording waiting (%.1f s) — fetching ===".format(clipSeconds(s) ?: 0.0))
+            val wav = try {
+                ClipDownload.fetch(this@MainActivity, address) { logLine(it) }
+            } catch (e: Exception) {
+                logLine("EXCEPTION: $e"); null
+            }
+            if (wav != null) {
+                val file = clips.save(wav)
+                logLine("=== Saved ${file.name} ===\n")
+                renderRecordings()
+            } else {
+                /* Back off rather than retry on the next advertisement: the clip is still
+                 * on the ring, so the trigger would fire again immediately. */
+                autoRetryAfter = SystemClock.elapsedRealtime() + AUTO_RETRY_PAUSE_MS
+                logLine("=== Fetch failed — will try again shortly ===\n")
+            }
+            autoFetching = false
+        }
+    }
+
+    private fun renderRecordings() {
+        val files = clips.list()
+        recordings.removeAllViews()
+        recordingsTitle.visibility = if (files.isEmpty()) View.GONE else View.VISIBLE
+        for (file in files.take(MAX_LISTED)) {
+            val btn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
+            btn.text = ClipStore.label(file)
+            btn.setOnClickListener { play(file) }
+            recordings.addView(btn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
     }
 
     /** Seconds of audio the ring is holding, or null when there is none. */
@@ -168,11 +224,14 @@ class MainActivity : AppCompatActivity() {
         actions.removeAllViews()
         when (kind) {
             RingKind.CFW -> {
-                /* Downloading first: it is what the user came for when a recording is
-                 * waiting, and entering failsafe would throw that recording away — the
-                 * clip lives in RAM and a reset takes it. */
-                if (hasAudio) addAction("Download recording") { downloadClip() }
-                if (clip != null) addInstantAction("Play recording") { playClip() }
+                /* Recordings arrive on their own; this only exists for the case where the
+                 * automatic attempt failed and the user would rather not wait out the
+                 * pause. It sits above "Enter failsafe" because a reset takes the clip
+                 * with it — the ring holds it in RAM. */
+                if (hasAudio) addInstantAction("Fetch recording now") {
+                    autoRetryAfter = 0L
+                    maybeAutoFetch(scanner.state.value)
+                }
                 addAction("Enter failsafe") { runner.enterFailsafe() }
             }
             RingKind.FAILSAFE -> addAction("Flash CFW") { runner.flashCfw() }
@@ -181,15 +240,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun downloadClip(): Boolean {
-        val address = scanner.state.value.address ?: run { logLine("No ring in range."); return false }
-        val file = ClipDownload.fetch(this, address) { logLine(it) } ?: return false
-        clip = file
-        return true
-    }
-
-    private fun playClip() {
-        val file = clip ?: return
+    private fun play(file: File) {
         player?.release()
         player = MediaPlayer().apply {
             setDataSource(file.absolutePath)
@@ -197,7 +248,7 @@ class MainActivity : AppCompatActivity() {
             prepare()
             start()
         }
-        logLine("Playing ${file.name}…")
+        logLine("Playing ${ClipStore.label(file)}…")
     }
 
     /* Playing is instant and local; routing it through runOp would blank the buttons and
@@ -263,6 +314,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
+        const val AUTO_RETRY_PAUSE_MS = 20_000L
+        const val MAX_LISTED = 8
+
         val PERMISSIONS = arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_CONNECT,

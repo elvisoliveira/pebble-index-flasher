@@ -8,7 +8,6 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,10 +38,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object ClipDownload {
 
-    /** Bytes on the wire become a WAV in the app's files dir. Null if anything fails. */
+    /** Bytes on the wire become a WAV, returned for the caller to keep. Null on failure. */
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION") // one code path for minSdk 31..36, as elsewhere in this app
-    suspend fun fetch(context: Context, address: String, log: (String) -> Unit): File? {
+    suspend fun fetch(context: Context, address: String, log: (String) -> Unit): ByteArray? {
         val adapter = context.getSystemService(BluetoothManager::class.java).adapter
         if (adapter == null) { log("No Bluetooth"); return null }
         val device = adapter.getRemoteDevice(address)
@@ -146,11 +145,8 @@ object ClipDownload {
         log("Received ${data.size} bytes. Decoding…")
 
         val pcm = decodeAdpcm(data.toByteArray(), expectedSamples)
-        val file = File(context.filesDir, "clip.wav")
-        file.writeBytes(wav(pcm, SAMPLE_RATE))
-        val seconds = expectedSamples.toDouble() / SAMPLE_RATE
-        log("Saved %.1f s of audio.".format(seconds))
-        return file
+        log("Decoded %.1f s of audio.".format(expectedSamples.toDouble() / SAMPLE_RATE))
+        return wav(pcm, SAMPLE_RATE)
     }
 
     /**
