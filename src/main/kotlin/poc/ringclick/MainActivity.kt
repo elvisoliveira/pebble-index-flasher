@@ -3,6 +3,7 @@ package poc.ringclick
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
@@ -23,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Pebble Index CFW Manager — single-screen, offline. A continuous BLE scan is the
@@ -46,6 +48,12 @@ class MainActivity : AppCompatActivity() {
 
     private var busy = false
     private var renderedKind: RingKind? = null
+    /* The buttons are rebuilt only on a state change, so anything that changes which
+     * buttons belong on screen has to be part of that key — the audio ones appear and
+     * disappear as recordings come and go. */
+    private var renderedAudio = false
+    private var clip: File? = null
+    private var player: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)   // Material You wallpaper palette
@@ -88,6 +96,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scanner.stop()
+        player?.release()
+        player = null
         scope.cancel()
     }
 
@@ -111,6 +121,8 @@ class MainActivity : AppCompatActivity() {
             if (s.kind == RingKind.CFW) {
                 append("\nClicks: ").append(s.totalClicks)
                 if (s.counter != null) append("  (counter ").append(s.counter).append(')')
+                val secs = clipSeconds(s)
+                if (secs != null) append("\nRecording waiting: %.1f s".format(secs))
             }
             if (s.kind == RingKind.FAILSAFE) {
                 append("\n\nTo restore the official firmware, keep the ring in failsafe and open the official app — it will sync and reinstall it.")
@@ -124,7 +136,14 @@ class MainActivity : AppCompatActivity() {
         })
         // Rebuild buttons only on a state change — render() fires per advertisement,
         // and recreating a Button mid-tap would eat the tap.
-        if (!busy && s.kind != renderedKind) renderActions(s.kind)
+        val hasAudio = clipSeconds(s) != null
+        if (!busy && (s.kind != renderedKind || hasAudio != renderedAudio)) renderActions(s.kind, hasAudio)
+    }
+
+    /** Seconds of audio the ring is holding, or null when there is none. */
+    private fun clipSeconds(s: RingState): Double? {
+        val n = s.clipSamples ?: return null
+        return if (n > 0) n.toDouble() / ClipDownload.SAMPLE_RATE else null
     }
 
     private fun setState(label: String, color: Long) {
@@ -143,15 +162,51 @@ class MainActivity : AppCompatActivity() {
         else -> "weak"
     }
 
-    private fun renderActions(kind: RingKind) {
+    private fun renderActions(kind: RingKind, hasAudio: Boolean = false) {
         renderedKind = kind
+        renderedAudio = hasAudio
         actions.removeAllViews()
         when (kind) {
-            RingKind.CFW -> addAction("Enter failsafe") { runner.enterFailsafe() }
+            RingKind.CFW -> {
+                /* Downloading first: it is what the user came for when a recording is
+                 * waiting, and entering failsafe would throw that recording away — the
+                 * clip lives in RAM and a reset takes it. */
+                if (hasAudio) addAction("Download recording") { downloadClip() }
+                if (clip != null) addInstantAction("Play recording") { playClip() }
+                addAction("Enter failsafe") { runner.enterFailsafe() }
+            }
             RingKind.FAILSAFE -> addAction("Flash CFW") { runner.flashCfw() }
             RingKind.OFFICIAL -> addAction("Flash CFW") { runner.flashCfw() }
             RingKind.NONE -> {}
         }
+    }
+
+    private suspend fun downloadClip(): Boolean {
+        val address = scanner.state.value.address ?: run { logLine("No ring in range."); return false }
+        val file = ClipDownload.fetch(this, address) { logLine(it) } ?: return false
+        clip = file
+        return true
+    }
+
+    private fun playClip() {
+        val file = clip ?: return
+        player?.release()
+        player = MediaPlayer().apply {
+            setDataSource(file.absolutePath)
+            setOnCompletionListener { logLine("Playback finished.") }
+            prepare()
+            start()
+        }
+        logLine("Playing ${file.name}…")
+    }
+
+    /* Playing is instant and local; routing it through runOp would blank the buttons and
+     * spin a progress bar for something that has already happened. */
+    private fun addInstantAction(label: String, action: () -> Unit) {
+        val btn = MaterialButton(this)
+        btn.text = label
+        btn.setOnClickListener { action() }
+        actions.addView(btn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
     }
 
     private fun addAction(label: String, op: suspend () -> Boolean) {
@@ -173,7 +228,7 @@ class MainActivity : AppCompatActivity() {
             logLine(if (ok) "=== $label: OK ===\n" else "=== $label: failed ===\n")
             busy = false
             progress.visibility = View.GONE
-            renderActions(scanner.state.value.kind)
+            renderActions(scanner.state.value.kind, clipSeconds(scanner.state.value) != null)
         }
     }
 

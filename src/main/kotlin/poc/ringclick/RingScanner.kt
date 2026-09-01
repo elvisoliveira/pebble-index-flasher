@@ -23,6 +23,12 @@ data class RingState(
     /** Byte from the CFW click beacon (mfr 0xFFFF, payload[0]); null outside CFW. */
     val counter: Int? = null,
     val totalClicks: Int = 0,
+    /**
+     * Samples in the clip the ring is holding (payload bytes 3-4). Non-zero IS the
+     * "audio is waiting" flag — the ring needed no separate one, and the app can tell
+     * before connecting. Null on firmware old enough not to send it.
+     */
+    val clipSamples: Int? = null,
     val lastSeenMs: Long = 0L,
 )
 
@@ -66,6 +72,7 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
             if (kind == RingKind.NONE) return
 
             var counter: Int? = null
+            var clipSamples: Int? = null
             if (kind == RingKind.CFW && cfwMfr != null && cfwMfr.isNotEmpty()) {
                 counter = cfwMfr[0].toInt() and 0xFF
                 val prev = lastCounter
@@ -81,10 +88,13 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
                     }
                 }
                 lastCounter = counter
+                if (cfwMfr.size >= 5) {
+                    clipSamples = (cfwMfr[3].toInt() and 0xFF) or ((cfwMfr[4].toInt() and 0xFF) shl 8)
+                }
             }
 
             state.value = RingState(
-                kind, name, result.device.address, result.rssi, counter, total,
+                kind, name, result.device.address, result.rssi, counter, total, clipSamples,
                 SystemClock.elapsedRealtime(),
             )
         }
