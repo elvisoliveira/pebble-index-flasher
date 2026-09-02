@@ -4,16 +4,35 @@ name: build
 # the latest CFW release at build time. So a plain `assembleDebug` on a hosted
 # runner produces a complete APK.
 
+# Releasing is a three-rung ladder and this workflow only ever occupies the middle one.
+#
+#   1. DRAFT       write the notes. Drafts fire no event at all, not created and not
+#                  edited, so nothing builds and nobody sees it.
+#   2. PRE-RELEASE publishing the draft as a pre-release fires `published`: this builds
+#                  the APK and attaches it.
+#   3. RELEASE     ticking "set as the latest release" fires `released`, not
+#                  `published`, so it does not build a second time.
+#
+# The notes are written by a person first. `gh release create --generate-notes` used to
+# write them, and what it produced was a list of commit subjects.
+#
+# Triggering on the release rather than on a tag push is what makes "does the release
+# exist?" a question nobody has to ask: it exists because it is what started the run.
+#
+# ORDER MATTERS ACROSS REPOSITORIES. bundleFirmware fetches the LATEST CFW release, and
+# /releases/latest ignores pre-releases. So the firmware has to be promoted to latest
+# BEFORE this workflow runs, or the APK ships with the previous firmware inside it.
+
 on:
-  push:
-    tags: ['v*']          # a version tag (e.g. v1.0) builds and publishes the APK as a Release
-  workflow_dispatch:        # manual re-run only (does not fire on its own)
+  release:
+    types: [published]      # a draft published as a pre-release; see the ladder above
+  workflow_dispatch:        # plain build, artifact only, attaches to nothing
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # needed to create the Release and upload the APK on tag builds
+      contents: write       # to attach the APK to an existing release; nothing is created
     steps:
       - uses: actions/checkout@v4
 
@@ -33,11 +52,15 @@ jobs:
           name: pebble-index-flasher-debug
           path: build/outputs/apk/debug/*.apk
 
-      # On a version tag, publish the just-built APK as a GitHub Release.
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Attach the APK to the release that started this run. It exists by definition, so
+      # there is nothing to create and nothing to check. --clobber so that re-running the
+      # run, which keeps the same event payload, replaces the asset rather than failing
+      # on it. A failed build leaves the release with its notes and no APK, which is the
+      # cost of writing the notes first and the reason the middle rung is a PRE-release.
+      - name: Attach the APK to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes || true
-          gh release upload "$GITHUB_REF_NAME" build/outputs/apk/debug/*.apk --clobber
+          gh release upload "$TAG" build/outputs/apk/debug/*.apk --clobber
