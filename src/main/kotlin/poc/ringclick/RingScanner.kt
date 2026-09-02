@@ -39,13 +39,13 @@ data class RingState(
  * firmware apart"):
  *   CFW      -> mfr company 0xFFFF (payload[0] = click counter)
  *   FAILSAFE -> mfr company 0x0EEA, payload starts with AD DE AD DE
- *   OFFICIAL -> mfr company 0x0EEA, payload starts with FF FF
- * Both stock states are matched positively by their payload signature; anything else is
- * ignored (NONE), never guessed.
+ *   OFFICIAL -> mfr company 0x0EEA, anything else
+ * Only the failsafe is matched positively; every other stock advertisement is a normal
+ * ring. See classify() for why that asymmetry is the right one.
  *
  * The name and the advertised service UUID are NOT reliable: official and failsafe
  * share both (same device-specific "Pebble Index <suffix>" and the same 0x0EEA company
- * id) — only the payload signature tells them apart. See classify().
+ * id) — only the payload tells them apart. See classify().
  *
  * No ScanFilter: the native filter only matches names exactly and we need a substring.
  */
@@ -167,31 +167,45 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
         const val STOCK_COMPANY = 0x0EEA    // shared by official AND failsafe
         private const val STALE_MS = 1_000L   // burst mode: track the ~3s burst closely
 
-        // Both stock firmwares carry a signature in the first bytes of their 0x0EEA
-        // payload, and the signatures are mutually exclusive (0xAD vs 0xFF at byte 0):
-        //   FAILSAFE_MARKER — the boot-attempt-counter "deadhead", a firmware constant
-        //     confirmed against the flash marker documented in the firmware wiki.
-        //   OFFICIAL_MARKER — the captured ring's official payload is FF FF B9 D8 XX YY,
-        //     where the last two bytes change between advertisements (a live counter) and
-        //     FF FF B9 D8 stays constant. Matching the FF FF prefix is deliberate — the
-        //     full payload varies. ponytail: one physical ring, so whether B9 D8 is
-        //     device-specific is unverified; FF FF looks like a fixed tag. If a second
-        //     ring's official payload does not start with FF FF, widen this signature.
+        // The failsafe's signature: the boot-attempt-counter "deadhead" (0xDEADDEAD, LE
+        // on the wire), a firmware constant confirmed against the flash marker in the
+        // firmware wiki. It is the ONLY payload matched positively — see classify().
+        //
+        // The stock payloads seen so far, all 6 bytes, all company 0x0EEA:
+        //   AD DE AD DE ..    failsafe            (0xDEADDEAD)
+        //   EF BE AD DE 15 40 factory ring, never paired (0xDEADBEEF)  [2026-09-02]
+        //   FF FF B9 D8 XX YY configured ring, last two bytes a live counter
+        // The first four bytes are a state fingerprint, not an identity tag, and this
+        // app has no business enumerating its values: the vendor's own scanner parses
+        // the fingerprint and asks exactly one question of it — is this the failsafe.
         private val FAILSAFE_MARKER = byteArrayOf(0xAD.toByte(), 0xDE.toByte(), 0xAD.toByte(), 0xDE.toByte())
-        private val OFFICIAL_MARKER = byteArrayOf(0xFF.toByte(), 0xFF.toByte())
 
         /**
-         * Pure classifier over the two manufacturer-data payloads. Both stock states are
-         * matched *positively* by their 0x0EEA signature; a 0x0EEA payload matching
-         * neither (or no recognised beacon at all) returns NONE — the caller ignores it
-         * rather than guessing a state and offering a destructive action on it.
+         * Pure classifier over the two manufacturer-data payloads.
+         *
+         * Only the FAILSAFE is matched positively. Everything else carrying Core
+         * Devices' company id, under a name containing "Pebble Index", is a normal
+         * ring. That asymmetry is deliberate and it is the vendor's own: their scanner
+         * parses a state fingerprint and asks `fingerprintMatchesFailsafe(...)` —
+         * failsafe or not — and never enumerates the other values.
+         *
+         * This used to demand an FF FF prefix for OFFICIAL, learned from the one ring
+         * available at the time, and it silently ignored anything else. A brand-new
+         * ring advertises EF BE AD DE (0xDEADBEEF) instead, so the flasher could not
+         * see a factory ring at all: it appeared in Android's pairing list, which needs
+         * only the name, and nowhere in this app, which demanded the signature. The
+         * lesson is not "add a third constant" — it is that the fingerprint is state,
+         * it will keep changing, and a whitelist of its values will keep going stale.
+         *
+         * What the old strictness bought was refusing to offer the destructive
+         * official -> failsafe action on something unrecognised. The name filter plus a
+         * company id registered to Core Devices is enough to keep that honest.
          */
         fun classify(cfwMfr: ByteArray?, stockMfr: ByteArray?): RingKind = when {
             cfwMfr != null -> RingKind.CFW
             stockMfr == null -> RingKind.NONE
             stockMfr.startsWith(FAILSAFE_MARKER) -> RingKind.FAILSAFE
-            stockMfr.startsWith(OFFICIAL_MARKER) -> RingKind.OFFICIAL
-            else -> RingKind.NONE
+            else -> RingKind.OFFICIAL
         }
 
         private fun ByteArray.startsWith(prefix: ByteArray): Boolean {
