@@ -17,10 +17,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.color.DynamicColors
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +67,6 @@ class MainActivity : AppCompatActivity() {
     private var autoRetryAfter = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        DynamicColors.applyToActivityIfAvailable(this)   // Material You wallpaper palette
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -93,15 +92,18 @@ class MainActivity : AppCompatActivity() {
         clips = ClipStore(this)
         renderRecordings()
 
-        // targetSdk 36 forces edge-to-edge: keep the content off the system bars.
+        // targetSdk 36 forces edge-to-edge: keep the content off the navigation bar.
+        // The top inset is the AppBarLayout's (fitsSystemWindows in the layout).
         findViewById<View>(R.id.root).setOnApplyWindowInsetsListener { v, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            v.setPadding(0, bars.top, 0, bars.bottom)
+            v.setPadding(0, 0, 0, insets.getInsets(WindowInsets.Type.systemBars()).bottom)
             insets
         }
 
+        val images = ImageStore(this)
+        findViewById<TextView>(R.id.cfwPill).text = images.cfwVersion
+        logLine("App ${packageManager.getPackageInfo(packageName, 0).versionName}  ·  CFW ${images.cfwVersion}")
         scanner = RingScanner(this) { logLine(it) }
-        runner = OperationRunner(this, scanner, ImageStore(this)) { logLine(it) }
+        runner = OperationRunner(this, scanner, images) { logLine(it) }
 
         if (PERMISSIONS.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
             start()
@@ -135,10 +137,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun render(s: RingState) {
         when (s.kind) {
-            RingKind.CFW -> setState("CFW", 0xFF2E7D32)
-            RingKind.FAILSAFE -> setState("FAILSAFE", 0xFFEF6C00)
-            RingKind.OFFICIAL -> setState("OFFICIAL", 0xFF1565C0)
-            RingKind.NONE -> setState("NOT FOUND", 0xFF616161)
+            RingKind.CFW -> setState("CFW", R.color.state_cfw)
+            RingKind.FAILSAFE -> setState("FAILSAFE", R.color.state_failsafe)
+            RingKind.OFFICIAL -> setState("OFFICIAL", R.color.state_official)
+            RingKind.NONE -> setState("NOT FOUND", R.color.state_none)
         }
         detailView.text = if (s.kind == RingKind.NONE) "No ring in range." else buildString {
             append(s.name).append("  ·  ").append(s.address).append('\n')
@@ -207,13 +209,31 @@ class MainActivity : AppCompatActivity() {
                 setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
                 setPadding(8, 8, 8, 8)
             })
+            return
         }
         for (file in files) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
             btn.text = ClipStore.label(file)
             btn.setOnClickListener { play(file) }
-            recordings.addView(btn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            row.addView(btn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            val trash = MaterialButton(this, null, com.google.android.material.R.attr.materialIconButtonStyle)
+            trash.setIconResource(R.drawable.ic_delete)
+            trash.contentDescription = "Delete"
+            trash.setOnClickListener { clips.delete(file); renderRecordings() }
+            row.addView(trash)
+            recordings.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
+        val clear = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle)
+        clear.text = "Clear all"
+        clear.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setMessage("Delete all ${files.size} recordings? The ring keeps no copy.")
+                .setPositiveButton("Delete") { _, _ -> clips.clear(); renderRecordings() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        recordings.addView(clear, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = 24 })
     }
 
     /** Seconds of audio the ring is holding, or null when there is none. */
@@ -222,9 +242,9 @@ class MainActivity : AppCompatActivity() {
         return if (n > 0) n.toDouble() / ClipDownload.SAMPLE_RATE else null
     }
 
-    private fun setState(label: String, color: Long) {
+    private fun setState(label: String, color: Int) {
         stateChip.text = label
-        stateChip.backgroundTintList = ColorStateList.valueOf(color.toInt())
+        stateChip.backgroundTintList = ColorStateList.valueOf(getColor(color))
     }
 
     private fun instruction(text: String?) {
@@ -305,7 +325,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderPermissionDenied() {
-        setState("NO PERMISSION", 0xFF616161)
+        setState("NO PERMISSION", R.color.state_none)
         detailView.text = "Bluetooth permission is required to find the ring."
         actions.removeAllViews()
         val retry = MaterialButton(this).apply {

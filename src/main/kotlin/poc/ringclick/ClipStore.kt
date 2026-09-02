@@ -27,12 +27,16 @@ class ClipStore(context: Context) {
         return file
     }
 
+    fun delete(file: File) { file.delete() }
+
+    fun clear() { list().forEach { it.delete() } }
+
     /** Newest first — the one just recorded is the one being looked for. */
     fun list(): List<File> =
         dir.listFiles { f -> f.name.endsWith(".wav") }?.sortedByDescending { stamp(it) } ?: emptyList()
 
     companion object {
-        private val LABEL_FORMAT = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault())
+        private val LABEL_FORMAT = SimpleDateFormat("d MMM, HH:mm:ss", Locale.getDefault())
 
         fun stamp(file: File): Long =
             file.name.removePrefix("clip-").removeSuffix(".wav").toLongOrNull() ?: file.lastModified()

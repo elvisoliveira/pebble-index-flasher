@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#E0E0E0</color>
+    <color name="on_primary">#1A1A1A</color>
+    <color name="primary_container">#2C2C2C</color>
+    <color name="on_primary_container">#EEEEEE</color>
+    <color name="secondary">#BDBDBD</color>
+    <color name="on_secondary">#1A1A1A</color>
+    <color name="secondary_container">#3A3A3A</color>
+    <color name="on_secondary_container">#EEEEEE</color>
+
+    <color name="surface">#121212</color>
+    <color name="on_surface">#EEEEEE</color>
+    <color name="surface_container">#1E1E1E</color>    <color name="nav_indicator">#4A4A4A</color>
+
+    <!-- Softer pills with dark text, so they do not glare on a dark surface -->
+    <color name="state_cfw">#A5D6A7</color>
+    <color name="state_failsafe">#FFCC80</color>
+    <color name="state_official">#A9C7FF</color>
+    <color name="state_none">#BDBDBD</color>
+    <color name="on_state">#1A1A1A</color>
+
+    <!-- Dark status-bar icons over the light-gray toolbar; light icons over the graphite. -->
+    <bool name="light_status_bar">false</bool>
+</resources>
