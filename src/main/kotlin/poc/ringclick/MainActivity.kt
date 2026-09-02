@@ -16,7 +16,9 @@ import android.view.WindowInsets
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.progressindicator.LinearProgressIndicator
@@ -28,7 +30,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Pebble Index CFW Manager — single-screen, offline. A continuous BLE scan is the
+ * Pebble Index CFW Manager — one Activity, offline. Three pages (ring / recordings / log)
+ * live in one layout and a bottom bar toggles their visibility. A continuous BLE scan is the
  * source of truth; the status card and buttons react to the ring's state (OFFICIAL /
  * FAILSAFE / CFW / not found). Each action is a guided chain (OperationRunner) that
  * hides the discovery/verification gotchas.
@@ -46,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var actions: LinearLayout
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
+    private lateinit var bottomNav: BottomNavigationView
 
     private var busy = false
     private var renderedKind: RingKind? = null
@@ -56,7 +60,6 @@ class MainActivity : AppCompatActivity() {
     private var player: MediaPlayer? = null
     private lateinit var clips: ClipStore
     private lateinit var recordings: LinearLayout
-    private lateinit var recordingsTitle: TextView
     /* Auto-fetch guards. The ring drops a clip once it has been delivered, so a success
      * takes the advertisement's count to zero and cannot re-trigger. A FAILURE leaves it
      * there, and without a pause every advertisement would start another attempt. */
@@ -76,7 +79,17 @@ class MainActivity : AppCompatActivity() {
         logView = findViewById(R.id.logView)
         logScroll = findViewById(R.id.logScroll)
         recordings = findViewById(R.id.recordings)
-        recordingsTitle = findViewById(R.id.recordingsTitle)
+        bottomNav = findViewById(R.id.bottomNav)
+        val pages = mapOf(
+            R.id.tabRing to findViewById<View>(R.id.pageRing),
+            R.id.tabRecordings to findViewById<View>(R.id.pageRecordings),
+            R.id.tabLog to logScroll,
+        )
+        bottomNav.setOnItemSelectedListener { item ->
+            pages.forEach { (id, v) -> v.visibility = if (id == item.itemId) View.VISIBLE else View.GONE }
+            if (item.itemId == R.id.tabRecordings) bottomNav.removeBadge(R.id.tabRecordings)
+            true
+        }
         clips = ClipStore(this)
         renderRecordings()
 
@@ -174,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 val file = clips.save(wav)
                 logLine("=== Saved ${file.name} ===\n")
                 renderRecordings()
+                if (bottomNav.selectedItemId != R.id.tabRecordings) bottomNav.getOrCreateBadge(R.id.tabRecordings)
             } else {
                 /* Back off rather than retry on the next advertisement: the clip is still
                  * on the ring, so the trigger would fire again immediately. */
@@ -187,8 +201,14 @@ class MainActivity : AppCompatActivity() {
     private fun renderRecordings() {
         val files = clips.list()
         recordings.removeAllViews()
-        recordingsTitle.visibility = if (files.isEmpty()) View.GONE else View.VISIBLE
-        for (file in files.take(MAX_LISTED)) {
+        if (files.isEmpty()) {
+            recordings.addView(TextView(this).apply {
+                text = "No recordings yet. Hold the ring's button to record."
+                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+                setPadding(8, 8, 8, 8)
+            })
+        }
+        for (file in files) {
             val btn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
             btn.text = ClipStore.label(file)
             btn.setOnClickListener { play(file) }
@@ -248,6 +268,7 @@ class MainActivity : AppCompatActivity() {
             prepare()
             start()
         }
+        Toast.makeText(this, "Playing ${ClipStore.label(file)}", Toast.LENGTH_SHORT).show()
         logLine("Playing ${ClipStore.label(file)}…")
     }
 
@@ -315,7 +336,6 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val AUTO_RETRY_PAUSE_MS = 20_000L
-        const val MAX_LISTED = 8
 
         val PERMISSIONS = arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,

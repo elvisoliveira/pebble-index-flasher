@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/tabRing" android:title="Ring" android:icon="@drawable/ic_tab_ring" />
+    <item android:id="@+id/tabRecordings" android:title="Recordings" android:icon="@drawable/ic_tab_mic" />
+    <item android:id="@+id/tabLog" android:title="Log" android:icon="@drawable/ic_tab_log" />
+</menu>
