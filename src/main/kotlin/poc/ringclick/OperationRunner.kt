@@ -20,6 +20,7 @@ class OperationRunner(
     private val context: Context,
     private val scanner: RingScanner,
     private val images: ImageStore,
+    private val keys: RingKeys,
     private val log: (String) -> Unit,
 ) {
     private val flasher = Flasher(context, log)
@@ -31,7 +32,7 @@ class OperationRunner(
         if (s.kind != RingKind.CFW || s.address == null) {
             log("'Enter failsafe' is only possible from CFW."); return false
         }
-        if (!CfwControl.enterFailsafe(context, s.address, log)) return false
+        if (!CfwControl.enterFailsafe(context, s.address, keys, log)) return false
         return verify(RingKind.FAILSAFE)
     }
 

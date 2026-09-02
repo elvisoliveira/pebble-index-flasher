@@ -14,7 +14,12 @@ running right now:
 
 - **Official** — the factory firmware.
 - **CFW** — the custom firmware. Here the app also shows a counter that goes up
-  each time you press the ring's button.
+  each time you press the ring's button, fetches the recordings the ring makes,
+  and pairs with the ring: on the first click after the firmware boots, the ring
+  hands the app a key that every recording is encrypted with and that the
+  "enter failsafe" command must be signed with. The key is stored per ring, and
+  the ring's advertisement says which key it holds, so a ring that rebooted (and
+  forgot its key) is paired again on its next click without anything to do.
 - **Failsafe** — a recovery mode, from which any firmware can be reinstalled.
 
 Depending on the state, it offers the right button: install the custom firmware

@@ -29,6 +29,13 @@ data class RingState(
      * before connecting. Null on firmware old enough not to send it.
      */
     val clipSamples: Int? = null,
+    /**
+     * Id of the key the ring holds (payload bytes 1-2): 0 means none, so it must be
+     * paired on the next click before anything encrypted can be read. Compared against
+     * RingKeys before a fetch, because a reboot forgets the ring's key and the id is
+     * how the phone finds out. Null on firmware old enough not to send it.
+     */
+    val keyId: Int? = null,
     val lastSeenMs: Long = 0L,
 )
 
@@ -73,6 +80,7 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
 
             var counter: Int? = null
             var clipSamples: Int? = null
+            var keyId: Int? = null
             if (kind == RingKind.CFW && cfwMfr != null && cfwMfr.isNotEmpty()) {
                 counter = cfwMfr[0].toInt() and 0xFF
                 val prev = lastCounter
@@ -89,12 +97,13 @@ class RingScanner(private val context: Context, private val log: (String) -> Uni
                 }
                 lastCounter = counter
                 if (cfwMfr.size >= 5) {
+                    keyId = (cfwMfr[1].toInt() and 0xFF) or ((cfwMfr[2].toInt() and 0xFF) shl 8)
                     clipSamples = (cfwMfr[3].toInt() and 0xFF) or ((cfwMfr[4].toInt() and 0xFF) shl 8)
                 }
             }
 
             state.value = RingState(
-                kind, name, result.device.address, result.rssi, counter, total, clipSamples,
+                kind, name, result.device.address, result.rssi, counter, total, clipSamples, keyId,
                 SystemClock.elapsedRealtime(),
             )
         }

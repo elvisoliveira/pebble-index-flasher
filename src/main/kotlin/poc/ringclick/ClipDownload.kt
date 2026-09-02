@@ -22,9 +22,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Protocol, all of it:
  *
  *     app -> ring   control point write {0x01, chunk_lo, chunk_hi}
- *     ring -> app   control point notify {0x01, samples_lo, samples_hi}   "starting"
- *     ring -> app   audio notify, one chunk at a time
- *     ring -> app   control point notify {0x02}                          "done"
+ *     ring -> app   control point notify {0x01, samples(2), key_id(2), nonce(12)}   "starting"
+ *     ring -> app   audio notify, one chunk at a time, XOR ChaCha20(key, nonce) from
+ *                   counter 0 at the start of the clip
+ *     ring -> app   control point notify {0x02}                                    "done"
+ *
+ * The clip is encrypted under the key the ring handed this app on a click
+ * (CfwControl.pair, RingKeys). The header names the key by id so a stale key fails
+ * here, with a reason, instead of decoding to noise; the nonce is the ring's, fresh
+ * per transfer. Anyone in range may still ask for the clip — what they get is the
+ * ciphertext.
  *
  * Two things carry the weight. The MTU: at the 23-byte default a notification holds 20
  * bytes and a full clip needs 820 of them, while at 247 it holds 244 and needs 68 — so
@@ -41,7 +48,9 @@ object ClipDownload {
     /** Bytes on the wire become a WAV, returned for the caller to keep. Null on failure. */
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION") // one code path for minSdk 31..36, as elsewhere in this app
-    suspend fun fetch(context: Context, address: String, log: (String) -> Unit): ByteArray? {
+    suspend fun fetch(context: Context, address: String, keys: RingKeys, log: (String) -> Unit): ByteArray? {
+        val entry = keys.get(address)
+        if (entry == null) { log("FAILED: no key for this ring — click it so the app can pair first."); return null }
         val adapter = context.getSystemService(BluetoothManager::class.java).adapter
         if (adapter == null) { log("No Bluetooth"); return null }
         val device = adapter.getRemoteDevice(address)
@@ -51,6 +60,8 @@ object ClipDownload {
         val finished = CompletableDeferred<Boolean>()
         val data = ArrayList<Byte>(32 * 1024)
         var expectedSamples = 0
+        var keyId = 0
+        var nonce: ByteArray? = null
         var mtu = 23
 
         val callback = object : BluetoothGattCallback() {
@@ -78,9 +89,15 @@ object ClipDownload {
                 val v = ch.value ?: return
                 when (ch.uuid) {
                     CTRL_POINT_UUID -> when {
-                        v.size >= 3 && v[0] == CMD_SEND -> {
+                        v.size >= HEADER_LEN && v[0] == CMD_SEND -> {
                             expectedSamples = (v[1].toInt() and 0xFF) or ((v[2].toInt() and 0xFF) shl 8)
-                            log("Ring is sending $expectedSamples samples…")
+                            keyId = (v[3].toInt() and 0xFF) or ((v[4].toInt() and 0xFF) shl 8)
+                            nonce = v.copyOfRange(5, HEADER_LEN)
+                            log("Ring is sending $expectedSamples samples under key $keyId…")
+                        }
+                        v.size >= 3 && v[0] == CMD_SEND -> {
+                            log("FAILED: this firmware sends the clip in the clear — it predates the key.")
+                            finished.complete(false)
                         }
                         v.isNotEmpty() && v[0] == CMD_DONE -> finished.complete(true)
                     }
@@ -142,9 +159,18 @@ object ClipDownload {
             log("FAILED: short transfer — ${data.size} of $wanted bytes.")
             return null
         }
-        log("Received ${data.size} bytes. Decoding…")
+        val n = nonce
+        if (n == null || keyId != entry.id) {
+            /* The ring's key is not ours: it rebooted and re-keyed, or another phone
+             * paired it. The scan shows the id too, so the next click pairs again. */
+            log("FAILED: the ring's key ($keyId) is not the one stored (${entry.id}) — click to pair again.")
+            return null
+        }
+        log("Received ${data.size} bytes. Decrypting and decoding…")
 
-        val pcm = decodeAdpcm(data.toByteArray(), expectedSamples)
+        val clip = data.toByteArray().copyOf(wanted)
+        ChaCha20.xor(entry.key, n, 0, clip)
+        val pcm = decodeAdpcm(clip, expectedSamples)
         log("Decoded %.1f s of audio.".format(expectedSamples.toDouble() / SAMPLE_RATE))
         return wav(pcm, SAMPLE_RATE)
     }
@@ -193,7 +219,7 @@ object ClipDownload {
     /**
      * MIC_SAMPLE_RATE_HZ on the ring, and it has to match or the pitch comes out wrong.
      *
-     * The converter free-runs at about 11 kHz — whatever its conversion time makes it,
+     * The converter free-runs at about 14 kHz — whatever its conversion time makes it,
      * not a rate anyone chose — and the firmware averages that down to 8 kHz, which is
      * the telephone standard, plenty for voice, and fits 37% more recording in the same
      * buffer.
@@ -206,6 +232,7 @@ object ClipDownload {
     private const val MAX_CHUNK = 244
     private const val CMD_SEND: Byte = 0x01
     private const val CMD_DONE: Byte = 0x02
+    private const val HEADER_LEN = 5 + ChaCha20.NONCE_LEN   /* opcode, samples, key id, nonce */
     private const val CONNECT_TIMEOUT_MS = 30_000L
     private const val OP_TIMEOUT_MS = 5_000L
     private const val TRANSFER_TIMEOUT_MS = 120_000L

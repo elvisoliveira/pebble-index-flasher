@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var renderedAudio = false
     private var player: MediaPlayer? = null
     private lateinit var clips: ClipStore
+    private lateinit var keys: RingKeys
     private lateinit var recordings: LinearLayout
     /* Auto-fetch guards. The ring drops a clip once it has been delivered, so a success
      * takes the advertisement's count to zero and cannot re-trigger. A FAILURE leaves it
@@ -90,6 +91,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
         clips = ClipStore(this)
+        keys = RingKeys(this)
         renderRecordings()
 
         // targetSdk 36 forces edge-to-edge: keep the content off the navigation bar.
@@ -103,7 +105,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.cfwPill).text = images.cfwVersion
         logLine("App ${packageManager.getPackageInfo(packageName, 0).versionName}  ·  CFW ${images.cfwVersion}")
         scanner = RingScanner(this) { logLine(it) }
-        runner = OperationRunner(this, scanner, images) { logLine(it) }
+        runner = OperationRunner(this, scanner, images, keys) { logLine(it) }
 
         if (PERMISSIONS.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
             start()
@@ -150,6 +152,12 @@ class MainActivity : AppCompatActivity() {
                 if (s.counter != null) append("  (counter ").append(s.counter).append(')')
                 val secs = clipSeconds(s)
                 if (secs != null) append("\nRecording waiting: %.1f s".format(secs))
+                append("\nKey: ").append(when {
+                    s.keyId == null -> "firmware predates the key"
+                    s.keyId == 0 -> "none on the ring — click to pair"
+                    keys.matches(s.address ?: "", s.keyId) -> "paired (id ${s.keyId})"
+                    else -> "ring holds key ${s.keyId}, not ours — click to pair"
+                })
             }
             if (s.kind == RingKind.FAILSAFE) {
                 append("\n\nTo restore the official firmware, keep the ring in failsafe and open the official app — it will sync and reinstall it.")
@@ -165,7 +173,7 @@ class MainActivity : AppCompatActivity() {
         // and recreating a Button mid-tap would eat the tap.
         val hasAudio = clipSeconds(s) != null
         if (!busy && (s.kind != renderedKind || hasAudio != renderedAudio)) renderActions(s.kind, hasAudio)
-        if (hasAudio) maybeAutoFetch(s)
+        if (s.kind == RingKind.CFW) maybeAutoFetch(s)
     }
 
     /*
@@ -173,15 +181,32 @@ class MainActivity : AppCompatActivity() {
      * recording, and the count it carries is non-zero only while a clip is still waiting.
      * So there is nothing to poll and nothing to ask — seeing one is reason enough to go
      * and get it, and the ring clearing it on delivery is what stops that from repeating.
+     *
+     * The key comes the same way. A beacon whose key id is 0, or is not the key stored
+     * for this address, means the ring must be paired before anything can be read — and
+     * a beacon IS a click, which is the only moment the ring will hand its key out. So
+     * pair on sight too, on its own connection; the ring's post-disconnect burst then
+     * shows the new id, and if a clip is waiting the next pass fetches it.
      */
     private fun maybeAutoFetch(s: RingState) {
         if (busy || autoFetching || SystemClock.elapsedRealtime() < autoRetryAfter) return
         val address = s.address ?: return
+        val keyId = s.keyId ?: return           /* old firmware: nothing to pair, nothing to decrypt */
+        val needsKey = !keys.matches(address, keyId)
+        if (!needsKey && clipSeconds(s) == null) return
         autoFetching = true
         scope.launch {
-            logLine("\n=== Recording waiting (%.1f s) — fetching ===".format(clipSeconds(s) ?: 0.0))
             val wav = try {
-                ClipDownload.fetch(this@MainActivity, address) { logLine(it) }
+                if (needsKey) {
+                    logLine("\n=== Ring key ${keyId} is not ours — pairing ===")
+                    val ok = CfwControl.pair(this@MainActivity, address, keys) { logLine(it) }
+                    if (ok) { logLine("=== Paired ===\n"); render(scanner.state.value) }
+                    if (!ok) autoRetryAfter = SystemClock.elapsedRealtime() + AUTO_RETRY_PAUSE_MS
+                    autoFetching = false
+                    return@launch
+                }
+                logLine("\n=== Recording waiting (%.1f s) — fetching ===".format(clipSeconds(s) ?: 0.0))
+                ClipDownload.fetch(this@MainActivity, address, keys) { logLine(it) }
             } catch (e: Exception) {
                 logLine("EXCEPTION: $e"); null
             }
