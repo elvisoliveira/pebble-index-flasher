@@ -17,8 +17,8 @@ android {
         applicationId = "poc.ringclick"
         minSdk = 31
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     compileOptions {
@@ -49,6 +49,13 @@ val bundleFirmware by tasks.registering {
     val cfwBin = File(assets, "cfw.bin")
     val versions = File(assets, "versions.json")
     outputs.files(cfwBin, versions)
+    // Never up to date. Its source is either a moving remote target (the LATEST
+    // release) or a path handed in at invocation time, and it declares neither as an
+    // input — so Gradle would happily keep whatever is already in assets/. That is not
+    // a stale build artifact, it is the wrong firmware: switching to -PcfwLocal was
+    // skipped as UP-TO-DATE and the APK kept shipping the previous release's image,
+    // silently, all the way to a ring. The build already requires the network.
+    outputs.upToDateWhen { false }
 
     val cfwRawUrl = "https://github.com/elvisoliveira/pebble-index-cfw/releases/latest/download/DA14531_App.bin"
     val cfwLatestApi = "https://api.github.com/repos/elvisoliveira/pebble-index-cfw/releases/latest"

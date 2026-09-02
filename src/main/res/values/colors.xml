@@ -1,4 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Fixed grayscale palette (matches the launcher icon); the state pills are the only color. Dark variants live in values-night/. -->
 <resources>
-    <color name="ic_launcher_background">#1565C0</color>
+    <color name="ic_launcher_background">#424242</color>
+
+    <color name="primary">#424242</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#E0E0E0</color>
+    <color name="on_primary_container">#1A1A1A</color>
+    <color name="secondary">#5F5F5F</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#EEEEEE</color>
+    <color name="on_secondary_container">#1A1A1A</color>
+
+    <color name="surface">#FAFAFA</color>
+    <color name="on_surface">#1A1A1A</color>
+    <color name="surface_container">#EFEFEF</color>
+    <color name="nav_indicator">#FFFFFF</color>
+
+    <!-- Ring state pills -->
+    <color name="state_cfw">#2E7D32</color>
+    <color name="state_failsafe">#EF6C00</color>
+    <color name="state_official">#1565C0</color>
+    <color name="state_none">#616161</color>
+    <color name="on_state">#FFFFFF</color>
+
+    <!-- Dark status-bar icons over the light-gray toolbar; light icons over the graphite. -->
+    <bool name="light_status_bar">true</bool>
 </resources>

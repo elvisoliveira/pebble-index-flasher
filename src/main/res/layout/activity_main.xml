@@ -1,33 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:keepScreenOn="true">
 
-    <com.google.android.material.card.MaterialCardView
+    <!-- fitsSystemWindows: the AppBarLayout pads itself by the status-bar inset, so
+         the toolbar keeps its full height and the color runs under the status bar. -->
+    <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="16dp">
+        android:background="?attr/colorPrimaryContainer"
+        android:fitsSystemWindows="true">
 
-        <LinearLayout
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorPrimaryContainer"
+            app:title="Pebble Index Flasher"
+            app:titleTextColor="?attr/colorOnPrimaryContainer">
+
+            <TextView
+                android:id="@+id/cfwPill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/bg_state_pill"
+                android:backgroundTint="?attr/colorPrimary"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp"
+                android:textColor="?attr/colorOnPrimary"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </com.google.android.material.appbar.MaterialToolbar>
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- Three pages in one layout; the bottom bar only toggles visibility. Everything
+         (scan, flash, player) stays on the Activity, so a tab switch touches none of it. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- Ring -->
+        <LinearLayout
+            android:id="@+id/pageRing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:orientation="vertical"
-            android:padding="20dp">
+            android:gravity="center"
+            android:padding="24dp">
 
             <TextView
                 android:id="@+id/stateChip"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_state_pill"
-                android:paddingHorizontal="14dp"
-                android:paddingVertical="6dp"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp"
                 android:text="SCANNING"
-                android:textColor="@android:color/white"
-                android:textSize="14sp"
+                android:textColor="@color/on_state"
+                android:textSize="16sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.08" />
 
@@ -35,54 +72,81 @@
                 android:id="@+id/detailView"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="16dp"
                 android:text="Starting…"
-                android:textAppearance="?attr/textAppearanceBodyMedium" />
+                android:gravity="center"
+                android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+            <TextView
+                android:id="@+id/instructionView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?android:attr/textColorSecondary"
+                android:visibility="gone" />
+
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:indeterminate="true"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/actions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:orientation="vertical" />
         </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
 
-    <TextView
-        android:id="@+id/instructionView"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
-        android:layout_marginTop="12dp"
-        android:textAppearance="?attr/textAppearanceBodyLarge"
-        android:visibility="gone" />
-
-    <com.google.android.material.progressindicator.LinearProgressIndicator
-        android:id="@+id/progress"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="12dp"
-        android:indeterminate="true"
-        android:visibility="gone" />
-
-    <LinearLayout
-        android:id="@+id/actions"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="4dp"
-        android:orientation="vertical" />
-
-    <ScrollView
-        android:id="@+id/logScroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:layout_weight="1"
-        android:background="?attr/colorSurfaceContainer">
-
-        <TextView
-            android:id="@+id/logView"
+        <!-- Recordings -->
+        <ScrollView
+            android:id="@+id/pageRecordings"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="16dp"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="11sp" />
-    </ScrollView>
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/recordings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:paddingBottom="32dp" />
+        </ScrollView>
+
+        <!-- Log -->
+        <ScrollView
+            android:id="@+id/logScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="?attr/colorSurfaceContainer"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/logView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="16dp"
+                android:hint="Nothing logged yet."
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="11sp" />
+        </ScrollView>
+    </FrameLayout>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorPrimaryContainer"
+        app:itemIconTint="?attr/colorOnPrimaryContainer"
+        app:itemTextColor="?attr/colorOnPrimaryContainer"
+        app:itemActiveIndicatorStyle="@style/NavIndicator"
+        app:menu="@menu/bottom_nav" />
 </LinearLayout>
